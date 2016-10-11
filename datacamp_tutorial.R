@@ -1,51 +1,68 @@
 #Rscripts from datacamp tutorial - https://campus.datacamp.com/courses/kaggle-r-tutorial-on-machine-learning/
 #also includes feature engineering from Megan Risdal - https://www.kaggle.com/mrisdal/titanic/exploring-survival-on-the-titanic
 
-# Assign the training set
-train <- read.csv(url("http://s3.amazonaws.com/assets.datacamp.com/course/Kaggle/train.csv"))
-
-# Assign the testing set
-test <- read.csv(url("http://s3.amazonaws.com/assets.datacamp.com/course/Kaggle/test.csv"))
-
-# Create the column child, and indicate whether child or no child
-train$Child <- NA
-train$Child[train$Age<18] <- 1
-train$Child[train$Age>=18] <- 0
-
-# Two-way comparison
-table(train$Child, train$Survived)
-prop.table(table(train$Child, train$Survived),1)
-
-
-# Decision Trees
+#Libraries
+library(dplyr)
 library(rpart)
-
-# Build the decision tree
-my_tree_two <- rpart(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data=train, method="class")
-
-# Visualize the decision tree using plot() and text()
-plot(my_tree_two)
-text(my_tree_two)
-
-# Load in the packages to create a fancified version of your tree
-
 library(rattle)
 library(rpart.plot)
 library(RColorBrewer)
 
-# Time to plot your fancified tree
-fancyRpartPlot(my_tree_two)
-my_prediction <- predict(my_tree_two, test, type="class") 
+# Assign the training and testing set
+#train <- read.csv(url("http://s3.amazonaws.com/assets.datacamp.com/course/Kaggle/train.csv"))
+#test <- read.csv(url("http://s3.amazonaws.com/assets.datacamp.com/course/Kaggle/test.csv"))
+train = read.csv("input/train.csv",stringsAsFactors = F)
+train$DataId = "train"
+test = read.csv("input/test.csv",stringsAsFactors = F)
+test$DataId = "test"
+
+#Create a common dataframe
+df = bind_rows(train,test)
+
+# Create the column child, and indicate whether passenger is child or no child
+df$Child <- NA
+df$Child[df$Age<18] <- 1
+df$Child[df$Age>=18] <- 0
+
+# Two-way comparison
+table(df$Child, df$Survived)
+prop.table(table(df$Child, df$Survived),1)
+table(df$Sex, df$Survived)
+prop.table(table(df$Sex, df$Survived),1)
+prop.table(table(df$Sex, df$Survived),2)
+
+#75 % of women in train survives, 68 % of those who survived were women
+#baseline model: all women survives 
+baseline = filter(df,DataId=="test")
+baseline$Survived[baseline$Sex=="female"]=1
+baseline$Survived[baseline$Sex=="male"]=0
+write.csv(select(baseline,PassengerId,Survived),"output/my_solution_1.csv",row.names = F)
+
+# Decision Trees
+#split the df back up
+train = subset(df,DataId=="train",select=-DataId)
+test = subset(df,DataId=="test",select=-c(DataId,Survived))
+
+# Build the decision tree
+my_tree <- rpart(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data=train, method="class")
+
+# Visualize the decision tree using plot() and text()
+plot(my_tree)
+text(my_tree)
+# Plot a fancified tree
+fancyRpartPlot(my_tree,sub="Decision tree for survival on the Titanic")
+
+#make a prediction (made a stupid error with data as an argument, instead of newdata - rtfm)
+my_prediction <- predict(my_tree, newdata=test, type="class")
 
 # Create a data frame with two columns: PassengerId & Survived. Survived contains your predictions
 my_solution <- data.frame(PassengerId = test$PassengerId, Survived = my_prediction)
 
-# Check that your data frame has 418 entries
-nrow(my_solution)
+# Check that  data frame has 418 entries
+nrow(my_solution)==418
 
-# Write your solution to a csv file 
+# Write  a csv file 
 write.csv(my_solution, file="my_datacamp2_solution.csv", row.names=F)
-
 
 # Create a new decision tree my_tree_three
 my_tree_three <- rpart(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data=train, method="class", control=rpart.control(minsplit=50, cp=0) )
