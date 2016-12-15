@@ -2,3 +2,5 @@
 .Rhistory
 .RData
 .Ruserdata
+.Rproj
+kaggle_titanic.Rproj

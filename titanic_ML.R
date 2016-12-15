@@ -20,6 +20,16 @@ test$DataId = "test"
 #Create a common dataframe
 df = bind_rows(train,test)
 
+#DEALING WITH MISSING DATA
+# Passenger on row 62 and 830 do not have a value for embarkment. 
+# Since many passengers embarked at Southampton, we give them the value S.
+# We code all embarkment codes as factors.
+df$Embarked[c(62,830)] = "S"
+df$Embarked <- factor(df$Embarked)
+
+# Passenger on row 1044 has an NA Fare value. Let's replace it with the median fare value.
+df$Fare[1044] <- median(df$Fare, na.rm=TRUE)
+
 #FEATURE ENGINEERING
 # Create the column child, and indicate whether passenger is child or no child
 df$Child <- NA
@@ -44,17 +54,51 @@ df$Title[df$Title %in% rare_title]  <- 'Rare Title'
 # Show title counts by sex
 table(df$Sex, df$Title)
 
-#DEALING WITH MISSING DATA
-# Passenger on row 62 and 830 do not have a value for embarkment. 
-# Since many passengers embarked at Southampton, we give them the value S.
-# We code all embarkment codes as factors.
-df$Embarked[c(62,830)] = "S"
-df$Embarked <- factor(df$Embarked)
+#Family size
+df$Surname <- sapply(df$Name, FUN=function(x) {strsplit(x, split='[,.]')[[1]][1]})
+df$family_id <- paste0(df$Surname,as.character(df$family_size))
+nlevels(as.factor(df$family_id))
+df$family_id[df$family_size <= 2] <- 'Small'
+nlevels(as.factor(df$family_id))
+famIDs <- data.frame(table(df$family_id))
+famIDs <- famIDs[famIDs$Freq <= 2,]
+df$family_id[df$family_id %in% famIDs$Var1] <- 'Small'
+df$family_id = as.factor(df$family_id)
 
-# Passenger on row 1044 has an NA Fare value. Let's replace it with the median fare value.
-df$Fare[1044] <- median(df$Fare, na.rm=TRUE)
+#Cabin
+table(as.factor(df$Cabin),df$Pclass)
+#Er bokstaven nivå i skipet eller noe?
+strsplit(df$Cabin,"[1234567890]")[[1]][1]
+df$cabin_letter <- sapply(df$Cabin, FUN=function(x) {strsplit(x, split="[1234567890]")[[1]][1]})
+df$cabin_letter[is.na(df$cabin_letter)==T] = "0" #setter 0 for de uten cabin
+mosaicplot(table(as.factor(df$cabin_letter), df$Survived), main='Cabin Letter by Survival', shade=TRUE)
+df$cabin_letter= as.factor(df$cabin_letter)
+
+#Hva med tallet? Har det betydning (og annen betydning)?
+df$cabin_number <- sapply(df$Cabin, FUN=function(x) {strsplit(x, split="[ABCDEFGT]")[[1]][2]})
+df$cabin_number[is.na(df$cabin_number)==T] = "0" #setter 0 for de uten cabin
+nlevels(as.factor(df$cabin_number))
+hist(as.integer(df$cabin_number),df$Survived)
+mosaicplot(table(as.factor(df$cabin_number), df$Survived), main='Cabin Number by Survival', shade=TRUE)
+mosaicplot(table(as.factor(df$cabin_number),as.factor(df$cabin_letter), df$Survived), main='Cabin Letter by Survival', shade=TRUE)
+
+#ikke helt lett, la denne ligge inntil videre
+
+#Kan number of cabins være noe?
+length(strsplit(df$Cabin[28],"[ABCDEFGHT]")[[1]])
+df$cabin_count <- sapply(df$Cabin, FUN=function(x) {length(strsplit(x, split="[1234567890]")[[1]])/2})
+table(df$cabin_count)
+table(df$cabin_count,df$cabin_number)
+df$cabin_count[df$cabin_count==0.5&nchar(df$cabin_number)==1]=1
+df$cabin_count[df$cabin_count==1.5&nchar(df$cabin_number)==3]=2
+mosaicplot(table(as.factor(df$cabin_count), df$Survived), main='Number of cabins by Survival', shade=TRUE)
+
+#recode characters into factors (?)
+df$Sex = as.factor(df$Sex)
+df$Title = as.factor(df$Title)
 
 # How to fill in missing Age values?
+# Done after feature engineering
 # We make a prediction of a passengers Age using the other variables and a decision tree model. 
 # This time you give method="anova" since you are predicting a continuous variable.
 predicted_age <- rpart(Age ~ Pclass + Sex + SibSp + Parch + Fare + Embarked + Title + family_size,
@@ -64,15 +108,12 @@ df$Age[is.na(df$Age)] <- predict(predicted_age, df[is.na(df$Age),])
 #show sum of na
 apply(df,2,function(x){sum(is.na(x)==T)})
 
-#recode characters into factors (?)
-df$Sex = as.factor(df$Sex)
-df$Title = as.factor(df$Title)
 
+#MODELING!
 #split the df back up
 train = subset(df,DataId=="train",select=-DataId)
 test = subset(df,DataId=="test",select=-c(DataId,Survived))
 
-#MODELING!
 #First round of submissions was done without dealing with the missing values as above
 # Two-way comparison for a baseline model based on sex
 table(df$Sex, df$Survived)
@@ -140,6 +181,14 @@ my_prediction <- predict(my_tree_six, newdata=test, type="class")
 my_solution <- data.frame(PassengerId = test$PassengerId, Survived = my_prediction)
 write.csv(my_solution, file="output/my_solution_5.csv", row.names=F)
 
+#MODEL 6.1: Decision tree with title, family size, family_id, cabin_letter and cabin count
+my_tree_six_one <- rpart(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked + Title + family_size + family_id + cabin_letter + cabin_count, data=train, method="class")
+fancyRpartPlot(my_tree_six_one)
+my_prediction <- predict(my_tree_six_one, newdata=test, type="class")
+my_solution <- data.frame(PassengerId = test$PassengerId, Survived = my_prediction)
+write.csv(my_solution, file="output/my_solution_6.1.csv", row.names=F)
+#her dominerer title og familie-id fullstendig
+
 #MODEL 7: Random Forest
 #It grows multiple (very deep) classification trees using the training set. 
 #At the time of prediction, each tree is used to come up with a prediction and every outcome is counted as a vote. 
@@ -167,3 +216,44 @@ my_solution <- data.frame(PassengerId = test$PassengerId, Survived = my_predicti
 
 write.csv(my_solution, file="my_solution_6.csv", row.names=F)
 varImpPlot(my_forest)
+
+#Model 8 - logistic regression
+
+#basert på https://www.analyticsvidhya.com/blog/2015/11/beginners-guide-on-logistic-regression-in-r/
+#train <- read.csv('Train_Old.csv')
+#create training and validation data from given data
+#install.packages('caTools')
+#library(caTools)
+#set.seed(88)
+#split <- sample.split(train$Recommended, SplitRatio = 0.75)
+#get training and test data
+#dresstrain <- subset(train, split == TRUE)
+#dresstest <- subset(train, split == FALSE)
+#model <- glm (Survived ~ .-ID, data = dresstrain, family = binomial)
+#summary(model)
+#predict <- predict(model, type = 'response')
+
+model <- glm(as.factor(Survived) ~ Pclass + Sex + Age +  SibSp + Parch + Fare + Embarked + Title + cabin_count, data = train, family = binomial)
+summary(model)
+predict <- predict(model, type = 'response')
+
+apply(train,2,function(x){sum(is.na(x)==T)})
+
+#confusion matrix
+table(train$Survived, predict > 0.5)
+
+#ROCR Curve
+library(ROCR)
+ROCRpred <- prediction(predict, train$Survived)
+ROCRperf <- performance(ROCRpred, 'tpr','fpr')
+plot(ROCRperf, colorize = TRUE, text.adj = c(-0.2,1.7))
+
+#plot glm
+library(ggplot2)
+ggplot(train, aes(x=Pclass, y=Survived)) + geom_point() + 
+        stat_smooth(method="glm", family="binomial", se=FALSE)
+
+my_prediction <- predict(model, type = 'response',newdata=test)
+
+my_solution <- data.frame(PassengerId = test$PassengerId, Survived = round(my_prediction))
+write.csv(my_solution, file="output/my_solution_7.csv", row.names=F)
